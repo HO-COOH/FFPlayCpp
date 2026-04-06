@@ -6,13 +6,23 @@ extern "C" {
 }
 
 #include <SDL.h>
-
+import SDL.Window;
+import SDL.Renderer;
 import ffplay;
 
-int main(int argc, char* argv[]) {
+// Define the global variable here
+Options global_options;
 
-    //VideoState is;
-    Read
+
+constexpr static auto program_name = "ffplay-cpp";
+int main(int argc, char* argv[]) 
+{
+    SDL::Window window{ program_name, SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, global_options.screen_width, global_options.screen_height, 0 };
+    SDL::Renderer renderer{ window.Get(), -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC };
+
+    VideoState is;
+    is.Open();
+    is.EventLoop(window.Get());
 
     std::cout << "FFPlay C++ Rewrite Initialized!" << std::endl;
     

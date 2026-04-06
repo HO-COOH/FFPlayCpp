@@ -2,7 +2,7 @@ module;
 extern "C" {
 #include <libavformat/avformat.h>
 }
-export module ffplay:StreamSlot;
+export module utils.StreamSlot;
 
 import utils.PacketQueue;
 

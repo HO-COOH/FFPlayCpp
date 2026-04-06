@@ -50,7 +50,7 @@ std::expected<MyAVPacket, int> PacketQueue::get(bool block)
 	while (true)
 	{
 		if (abort_request)
-			return std::unexpected{ QueueError::Abort };
+			return std::unexpected{ -1 };
 
 		MyAVPacketInternal pkt;
 		if (m_pkt_list.try_pop(pkt))
@@ -62,7 +62,7 @@ std::expected<MyAVPacket, int> PacketQueue::get(bool block)
 		}
 
 		if (!block)
-			return std::unexpected{ QueueError::Empty };
+			return std::unexpected{ 0 };
 
 		m_cond.wait(lock);
 	}
