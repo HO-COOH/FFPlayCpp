@@ -22,7 +22,7 @@ int main(int argc, char* argv[])
 
     VideoState is;
     is.Open();
-    is.EventLoop(window.Get());
+    is.EventLoop(window.Get(), renderer.Get());
 
     std::cout << "FFPlay C++ Rewrite Initialized!" << std::endl;
     

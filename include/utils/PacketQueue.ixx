@@ -28,13 +28,14 @@ export class PacketQueue
 	int nb_packets{};
 	int size{};
 	int64_t duration{};
-	int serial{};
+
 	bool abort_request{ true };
 	std::mutex m_mutex;
 	std::condition_variable m_cond;
 
 	int putImpl(AVPacket* pkt);
 public:
+	int serial{};
 	void flush();
 	void start();
 	void abort();

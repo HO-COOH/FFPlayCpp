@@ -2,6 +2,7 @@ module;
 #include <utility>
 #include <thread>
 #include <chrono>
+#include <format>
 extern "C" {
 #include <libavformat/avformat.h>
 #include <libavcodec/avcodec.h>
@@ -14,12 +15,20 @@ import AV.RAII;
 int ReadThread::open_input()
 {
 	auto inContextPtr = m_inContext.get();
-	return avformat_open_input(
+	int const ret = avformat_open_input(
 		&inContextPtr,
 		"https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/1080/Big_Buck_Bunny_1080_10s_1MB.mp4",
 		nullptr,
 		nullptr
 	);
+	if (ret < 0)
+		return ret;
+
+	if (int const streamInfoRet = avformat_find_stream_info(m_inContext.get(), nullptr); streamInfoRet < 0)
+		return streamInfoRet;
+
+	max_frame_duration = (m_inContext->iformat->flags & AVFMT_TS_DISCONT) ? 10.0 : 3600.0;
+	return 0;
 }
 
 int ReadThread::set_streams()
@@ -70,8 +79,23 @@ int ReadThread::open_decoders()
 		m_mediaState.video.index = streamIndex;
 		m_mediaState.video.stream = m_inContext->streams[streamIndex];
 		AV::CodecContext codecContext{ avcodec_alloc_context3(nullptr) };
-		avcodec_parameters_to_context(codecContext.get(), m_inContext->streams[streamIndex]->codecpar);
-		codecContext->codec_id = avcodec_find_decoder(codecContext->codec_id)->id;
+		if (!codecContext)
+			return AVERROR(ENOMEM);
+
+		int const parametersToContextRet = avcodec_parameters_to_context(codecContext.get(), m_inContext->streams[streamIndex]->codecpar);
+		if (parametersToContextRet < 0)
+			return parametersToContextRet;
+
+		auto* codec = avcodec_find_decoder(codecContext->codec_id);
+		if (!codec)
+			return AVERROR_DECODER_NOT_FOUND;
+
+		codecContext->pkt_timebase = m_inContext->streams[streamIndex]->time_base;
+		int const openCodecRet = avcodec_open2(codecContext.get(), codec, nullptr);
+		if (openCodecRet < 0)
+			return openCodecRet;
+
+		m_mediaState.video.queue.start();
 		m_mediaState.videoDecoder.emplace(
 			m_inContext.get(),
 			std::move(codecContext),
@@ -85,11 +109,17 @@ int ReadThread::open_decoders()
 
 void ReadThread::read_loop()
 {
-	AVPacket* packet = av_packet_alloc();
-	while (true)
+	while (!m_mediaState.abort)
 	{
-		int ret = av_read_frame(m_inContext.get(), packet);
-		m_mediaState.RoutePacket(AV::Packet{ packet });
+		AV::Packet packet{ av_packet_alloc() };
+		if (!packet)
+			return;
+
+		int const ret = av_read_frame(m_inContext.get(), packet.get());
+		if (ret < 0)
+			return;
+
+		m_mediaState.RoutePacket(std::move(packet));
 	}
 }
 

@@ -26,6 +26,11 @@ export namespace SDL
 				SDL_DestroyRenderer(m_renderer);
 		}
 
+		constexpr SDL_Renderer* Get() const
+		{
+			return m_renderer;
+		}
+
 		~Renderer()
 		{
 			Destroy();

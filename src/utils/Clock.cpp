@@ -14,7 +14,7 @@ void Clock::Set(double pts, int serial)
 
 double Clock::Get() const
 {
-	if (*m_queue_serial != m_serial)
+	if (m_queue_serial && *m_queue_serial != m_serial)
 		return NAN;
 
 	if (m_paused)

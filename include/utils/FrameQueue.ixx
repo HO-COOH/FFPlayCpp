@@ -17,11 +17,11 @@ export template<std::size_t Capacity>
 class FrameQueue : public RingBuffer<Frame, Capacity>
 {
 	PacketQueue const& packetQueue_;
-	mutable std::mutex mutex_;
+
 	std::condition_variable cond_;
 	std::atomic<bool> abort_{ false };
 
-	int rindex_shown_ = 0;
+	bool rindex_shown_ = 0;
 	bool keep_last_;
 
 	constexpr int read_index() const noexcept {
@@ -29,6 +29,7 @@ class FrameQueue : public RingBuffer<Frame, Capacity>
 	}
 
 public:
+	mutable std::mutex mutex_;
 	explicit FrameQueue(PacketQueue const& packetQueue, bool keep_last = true) : packetQueue_(packetQueue), keep_last_(keep_last)
 	{
 		for (std::size_t i = 0; i < Capacity; i++)
@@ -59,6 +60,21 @@ public:
 		return &this->queue_[this->windex_];
 	}
 
+	[[nodiscard]] Frame& peek_last()
+	{
+		return this->queue_[this->rindex_];
+	}
+
+	[[nodiscard]] Frame& peek()
+	{
+		return this->queue_[read_index()];
+	}
+
+	[[nodiscard]] Frame& peek_next()
+	{
+		return this->queue_[this->wrap(this->rindex_ + rindex_shown_ + 1)];
+	}
+
 	void push() {
 		this->windex_ = this->wrap(this->windex_ + 1);
 		{
@@ -69,8 +85,7 @@ public:
 	}
 
 
-	template<typename CleanupFn = decltype([](AV::Frame&) {}) >
-	void next(CleanupFn cleanup = {}) 
+	void next() 
 	{
 		if (keep_last_ && !rindex_shown_)
 		{
@@ -78,7 +93,9 @@ public:
 			return;
 		}
 
-		cleanup(this->queue_[this->rindex_]);
+		auto& frame = this->queue_[this->rindex_];
+		av_frame_unref(frame.frame);
+		frame.uploaded = false;
 
 		this->rindex_ = this->wrap(this->rindex_ + 1);
 		{
@@ -93,7 +110,10 @@ public:
 	{
 		std::lock_guard<std::mutex> lock(mutex_);
 		while (this->size_ > 0) {
-			cleanup(this->queue_[this->rindex_]);
+			auto& frame = this->queue_[this->rindex_];
+			cleanup(frame);
+			av_frame_unref(frame.frame);
+			frame.uploaded = false;
 			this->rindex_ = this->wrap(this->rindex_ + 1);
 			this->size_--;
 		}
@@ -101,5 +121,21 @@ public:
 		this->rindex_ = 0;
 		rindex_shown_ = 0;
 		cond_.notify_one();
+	}
+
+	[[nodiscard]] int available() const noexcept
+	{
+		return this->size() - rindex_shown_;
+	}
+
+	[[nodiscard]] bool has_shown_frame() const noexcept
+	{
+		return rindex_shown_;
+	}
+
+	~FrameQueue()
+	{
+		for (auto& frame : this->queue_)
+			av_frame_free(&frame.frame);
 	}
 };

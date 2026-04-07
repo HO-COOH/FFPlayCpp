@@ -19,6 +19,7 @@ export class VideoDecoder
 	std::condition_variable& empty_queue_cond_ref;
 	std::jthread m_thread;
 	AVRational m_frameRate;
+	int m_packetSerial{};
 
 	template<std::size_t Capacity>
 	void queue_frame(FrameQueue<Capacity>& frameQueue, AV::Frame&& frame)
@@ -27,9 +28,13 @@ export class VideoDecoder
 		auto const duration = (m_frameRate.num && m_frameRate.den) ? av_q2d(AVRational{ m_frameRate.den, m_frameRate.num }) : 0;
 
 		auto videoPicture = frameQueue.peek_writable();
+		if (!videoPicture)
+			return;
 		videoPicture->fill(frame.get());
 		videoPicture->pts = pts;
 		videoPicture->duration = duration;
+		videoPicture->serial = m_packetSerial;
+		videoPicture->uploaded = false;
 		av_frame_move_ref(videoPicture->frame, frame.get());
 		frameQueue.push();
 	}
@@ -41,7 +46,7 @@ export class VideoDecoder
 		while (true)
 		{
 			auto got_frame = getFrame();
-			if (got_frame.has_value())
+			if (!got_frame.has_value())
 				return;
 
 			reallocFilterIfNeeded(*got_frame);

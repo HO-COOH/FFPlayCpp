@@ -12,9 +12,8 @@ protected:
     int windex_ = 0;
     int size_ = 0;
 
-    // internal helpers
-
-    static constexpr int wrap(int index) noexcept {
+    static constexpr int wrap(int index) noexcept 
+    {
         return index % static_cast<int>(Capacity);
     }
 

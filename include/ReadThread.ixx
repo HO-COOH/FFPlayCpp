@@ -26,6 +26,7 @@ export class ReadThread
 	int open_decoders();
 	void read_loop();
 public:
+	double max_frame_duration{};
 	ReadThread(MediaState& mediaState);
 	void Run();
 	void SeekToPercent(double percent);
