@@ -10,6 +10,7 @@ import AV.RAII;
 import utils.PacketQueue;
 import utils.StreamSlot;
 import utils.FrameQueue;
+import AV.Rational;
 
 export class VideoDecoder
 {
@@ -18,14 +19,14 @@ export class VideoDecoder
 	StreamSlot& stream_slot_ref;
 	std::condition_variable& empty_queue_cond_ref;
 	std::jthread m_thread;
-	AVRational m_frameRate;
+	AV::Rational m_frameRate;
 	int m_packetSerial{};
 
 	template<std::size_t Capacity>
 	void queue_frame(FrameQueue<Capacity>& frameQueue, AV::Frame&& frame)
 	{
 		auto const pts = (frame->pts == AV_NOPTS_VALUE) ? NAN : frame->pts * av_q2d(stream_slot_ref.stream->time_base);
-		auto const duration = (m_frameRate.num && m_frameRate.den) ? av_q2d(AVRational{ m_frameRate.den, m_frameRate.num }) : 0;
+		auto const duration = (m_frameRate.num && m_frameRate.den) ? static_cast<double>(m_frameRate.inv()) : 0;
 
 		auto videoPicture = frameQueue.peek_writable();
 		if (!videoPicture)

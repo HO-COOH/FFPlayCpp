@@ -4,6 +4,7 @@ extern "C" {
 }
 
 export module utils.Frame;
+import AV.Rational;
 
 export struct Frame
 {
@@ -17,7 +18,7 @@ export struct Frame
     int width{};
     int height{};
     int format{};
-    AVRational sample_aspect_ratio;
+    AV::Rational sample_aspect_ratio;
 
     constexpr bool flip_v() const
     {

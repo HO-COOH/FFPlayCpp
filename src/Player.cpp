@@ -18,169 +18,10 @@ import :Player;
 import :Options;
 import utils.Clock;
 
-namespace
-{
-	constexpr int ceil_rshift(int value, int shift)
-	{
-		return (value + (1 << shift) - 1) >> shift;
-	}
-
-	void calculate_display_rect(SDL_Rect& rect, int scr_xleft, int scr_ytop, int scr_width, int scr_height, Frame const& frame)
-	{
-		auto aspect_ratio = frame.sample_aspect_ratio;
-		if (av_cmp_q(aspect_ratio, av_make_q(0, 1)) <= 0)
-			aspect_ratio = av_make_q(1, 1);
-
-		aspect_ratio = av_mul_q(aspect_ratio, av_make_q(frame.width, frame.height));
-
-		int64_t height = scr_height;
-		int64_t width = av_rescale(height, aspect_ratio.num, aspect_ratio.den) & ~1;
-		if (width > scr_width)
-		{
-			width = scr_width;
-			height = av_rescale(width, aspect_ratio.den, aspect_ratio.num) & ~1;
-		}
-
-		rect.x = scr_xleft + static_cast<int>((scr_width - width) / 2);
-		rect.y = scr_ytop + static_cast<int>((scr_height - height) / 2);
-		rect.w = std::max(static_cast<int>(width), 1);
-		rect.h = std::max(static_cast<int>(height), 1);
-	}
-
-	void get_sdl_pix_fmt_and_blendmode(int format, Uint32& sdl_pix_fmt, SDL_BlendMode& sdl_blendmode)
-	{
-		sdl_blendmode = SDL_BLENDMODE_NONE;
-		sdl_pix_fmt = SDL_PIXELFORMAT_UNKNOWN;
-
-		switch (format)
-		{
-			case AV_PIX_FMT_RGB32:
-			case AV_PIX_FMT_RGB32_1:
-			case AV_PIX_FMT_BGR32:
-			case AV_PIX_FMT_BGR32_1:
-				sdl_blendmode = SDL_BLENDMODE_BLEND;
-				break;
-			default:
-				break;
-		}
-
-		switch (format)
-		{
-			case AV_PIX_FMT_YUV420P:
-			case AV_PIX_FMT_YUVJ420P:
-				sdl_pix_fmt = SDL_PIXELFORMAT_IYUV;
-				return;
-			case AV_PIX_FMT_YUYV422:
-				sdl_pix_fmt = SDL_PIXELFORMAT_YUY2;
-				return;
-			case AV_PIX_FMT_UYVY422:
-				sdl_pix_fmt = SDL_PIXELFORMAT_UYVY;
-				return;
-			case AV_PIX_FMT_RGB24:
-				sdl_pix_fmt = SDL_PIXELFORMAT_RGB24;
-				return;
-			case AV_PIX_FMT_BGR24:
-				sdl_pix_fmt = SDL_PIXELFORMAT_BGR24;
-				return;
-			case AV_PIX_FMT_ARGB:
-				sdl_pix_fmt = SDL_PIXELFORMAT_ARGB8888;
-				return;
-			case AV_PIX_FMT_RGBA:
-				sdl_pix_fmt = SDL_PIXELFORMAT_RGBA8888;
-				return;
-			case AV_PIX_FMT_ABGR:
-				sdl_pix_fmt = SDL_PIXELFORMAT_ABGR8888;
-				return;
-			case AV_PIX_FMT_BGRA:
-				sdl_pix_fmt = SDL_PIXELFORMAT_BGRA8888;
-				return;
-			default:
-				return;
-		}
-	}
-
-	bool recreate_texture(SDL_Renderer* renderer, SDL_Texture*& texture, Uint32 format, int width, int height, SDL_BlendMode blend_mode)
-	{
-		bool recreate = texture == nullptr;
-		if (!recreate)
-		{
-			Uint32 current_format{};
-			int current_width{};
-			int current_height{};
-			SDL_QueryTexture(texture, &current_format, nullptr, &current_width, &current_height);
-			recreate = current_format != format || current_width != width || current_height != height;
-		}
-
-		if (recreate)
-		{
-			if (texture)
-				SDL_DestroyTexture(texture);
-
-			texture = SDL_CreateTexture(renderer, format, SDL_TEXTUREACCESS_STREAMING, width, height);
-			if (!texture)
-				return false;
-
-			if (SDL_SetTextureBlendMode(texture, blend_mode) < 0)
-				return false;
-		}
-
-		return true;
-	}
-
-	bool upload_texture(SDL_Renderer* renderer, SDL_Texture*& texture, Frame& frame)
-	{
-		Uint32 sdl_pix_fmt{};
-		SDL_BlendMode sdl_blendmode{};
-		get_sdl_pix_fmt_and_blendmode(frame.frame->format, sdl_pix_fmt, sdl_blendmode);
-		if (sdl_pix_fmt == SDL_PIXELFORMAT_UNKNOWN)
-			return false;
-
-		if (!recreate_texture(renderer, texture, sdl_pix_fmt, frame.frame->width, frame.frame->height, sdl_blendmode))
-			return false;
-
-		int ret = 0;
-		switch (sdl_pix_fmt)
-		{
-			case SDL_PIXELFORMAT_IYUV:
-				if (frame.frame->linesize[0] > 0 && frame.frame->linesize[1] > 0 && frame.frame->linesize[2] > 0)
-				{
-					ret = SDL_UpdateYUVTexture(texture, nullptr,
-						frame.frame->data[0], frame.frame->linesize[0],
-						frame.frame->data[1], frame.frame->linesize[1],
-						frame.frame->data[2], frame.frame->linesize[2]);
-				}
-				else if (frame.frame->linesize[0] < 0 && frame.frame->linesize[1] < 0 && frame.frame->linesize[2] < 0)
-				{
-					ret = SDL_UpdateYUVTexture(texture, nullptr,
-						frame.frame->data[0] + frame.frame->linesize[0] * (frame.frame->height - 1), -frame.frame->linesize[0],
-						frame.frame->data[1] + frame.frame->linesize[1] * (ceil_rshift(frame.frame->height, 1) - 1), -frame.frame->linesize[1],
-						frame.frame->data[2] + frame.frame->linesize[2] * (ceil_rshift(frame.frame->height, 1) - 1), -frame.frame->linesize[2]);
-				}
-				else
-				{
-					return false;
-				}
-				break;
-			default:
-				if (frame.frame->linesize[0] < 0)
-				{
-					ret = SDL_UpdateTexture(texture, nullptr,
-						frame.frame->data[0] + frame.frame->linesize[0] * (frame.frame->height - 1),
-						-frame.frame->linesize[0]);
-				}
-				else
-				{
-					ret = SDL_UpdateTexture(texture, nullptr, frame.frame->data[0], frame.frame->linesize[0]);
-				}
-				break;
-		}
-
-		frame.uploaded = ret == 0;
-		return ret == 0;
-	}
-}
-
-Player::Player(Options options) : m_options{std::move(options)}
+Player::Player(Options options) : 
+	m_options{std::move(options)},
+	m_window{ m_options.program_name, SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, options.screen_width, options.screen_height, 0},
+	m_renderer{m_window.Get(), -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC}
 {
 }
 
@@ -189,10 +30,8 @@ int Player::Open(char const* url)
 	return m_readThread.Open(url, m_options);
 }
 
-void Player::EventLoop(SDL_Window* window, SDL_Renderer* renderer)
+void Player::EventLoop()
 {
-	m_window = window;
-	m_renderer = renderer;
 
 	SDL_Event event;
 	while (true)
@@ -316,13 +155,12 @@ void Player::onMouseButtonDown(SDL_Event const& event)
 void Player::toggleFullScreen()
 {
 	m_options.is_full_screen = !m_options.is_full_screen;
-	SDL_SetWindowFullscreen(m_window, m_options.is_full_screen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
+	m_window.SetFullscreen(m_options.is_full_screen);
 }
 
 void Player::seekToMousePosition(double mouseX)
 {
-	int windowWidth = m_options.screen_width;
-	SDL_GetWindowSize(m_window, &windowWidth, nullptr);
+	auto [windowWidth, _] = m_window.GetSize();
 	double const percent = std::clamp(mouseX / std::max(windowWidth, 1), 0.0, 1.0);
 	m_readThread.SeekToPercent(percent, m_options.seek_by_bytes);
 }
@@ -388,40 +226,15 @@ void Player::video_refresh(double& remaining_time)
 
 void Player::display()
 {
-	if (!m_renderer)
-		return;
-
-	SDL_SetRenderDrawColor(m_renderer, 0, 0, 0, 255);
-	SDL_RenderClear(m_renderer);
+	m_renderer.Clear();
 
 	if (m_mediaState.video.stream && m_mediaState.pictq.has_shown_frame())
 	{
 		auto& vp = m_mediaState.pictq.peek_last();
-		SDL_Rect rect{};
-		int width{};
-		int height{};
-		if (SDL_GetRendererOutputSize(m_renderer, &width, &height) < 0 || width <= 0 || height <= 0)
-			SDL_GetWindowSize(m_window, &width, &height);
-
-		calculate_display_rect(rect, 0, 0, width, height, vp);
-		if (!vp.uploaded)
-			upload_texture(m_renderer, m_videoTexture, vp);
-
-		if (vp.uploaded && m_videoTexture)
-		{
-			SDL_RenderCopyEx(
-				m_renderer,
-				m_videoTexture,
-				nullptr,
-				&rect,
-				0.0,
-				nullptr,
-				vp.flip_v() ? SDL_FLIP_VERTICAL : SDL_FLIP_NONE
-			);
-		}
+		m_renderer.Display(m_window.Get(), vp);
 	}
 
-	SDL_RenderPresent(m_renderer);
+	m_renderer.Present();
 }
 
 void Player::clampTimer(double now)
@@ -486,10 +299,5 @@ bool Player::shouldDropFrame(Frame const& vp, double now)
 void Player::doExit()
 {
 	m_mediaState.abort = true;
-	if (m_videoTexture)
-	{
-		SDL_DestroyTexture(m_videoTexture);
-		m_videoTexture = nullptr;
-	}
 	std::exit(0);
 }

@@ -7,6 +7,7 @@ import :SyncType;
 
 export struct Options
 {
+	constexpr static auto program_name{ "ffplay-cpp" };
 	int32_t screen_width = 640;
 	int32_t screen_height = 480;
 	bool is_full_screen{};

@@ -12,6 +12,8 @@ import utils.FrameQueue;
 import :MediaState;
 import utils.Frame;
 import :Options;
+import :Renderer;
+import SDL.Window;
 
 export class Player
 {
@@ -19,12 +21,11 @@ public:
 	Player(Options options);
 	int Open(char const* url);
 
-	void EventLoop(SDL_Window* window, SDL_Renderer* renderer);
+	void EventLoop();
 private:
 	Options m_options;
-	SDL_Window* m_window{ nullptr };
-	SDL_Renderer* m_renderer{ nullptr };
-	SDL_Texture* m_videoTexture{ nullptr };
+	SDL::Window m_window;
+	Renderer m_renderer;
 	Clock m_audioClock;
 	Clock m_videoClock;
 	Clock m_externalClock;
