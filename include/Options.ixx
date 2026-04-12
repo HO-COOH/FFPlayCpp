@@ -56,6 +56,3 @@ export struct Options
 	std::string video_background;
 	std::string hardware_accelerate;
 };
-
-// Declare the global variable so other modules can use it
-export extern Options global_options;

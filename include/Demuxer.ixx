@@ -3,17 +3,18 @@ module;
 extern "C" {
 #include <libavformat/avformat.h>
 }
-export module ffplay:ReadThread;
+export module ffplay:Demuxer;
 
 import AV.RAII;
 import :MediaState;
 import :SeekRequest;
+import :Options;
 
-export class ReadThread
+export class Demuxer
 {
 	MediaState& m_mediaState;
 	AV::FomatContext m_inContext{ avformat_alloc_context() };
-	AV::Packet m_packet{ av_packet_alloc() };
+	AV::Packet m_packet = AV::packet_alloc();
 	AVStream* m_stream{};
 	SeekRequest m_seekRequest;
 	std::condition_variable m_continue_read_thread;
@@ -21,13 +22,13 @@ export class ReadThread
 
 	std::jthread m_thread;
 
-	int open_input();
-	int set_streams();
+	int open_input(char const* url);
+	int set_streams(Options const& options);
 	int open_decoders();
 	void read_loop();
 public:
 	double max_frame_duration{};
-	ReadThread(MediaState& mediaState);
-	void Run();
-	void SeekToPercent(double percent);
+	Demuxer(MediaState& mediaState);
+	int Open(char const* url, Options const& options);
+	void SeekToPercent(double percent, bool seek_by_bytes);
 };

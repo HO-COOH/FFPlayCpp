@@ -1,4 +1,4 @@
 export module ffplay;
 
-export import :VideoState;
+export import :Player;
 export import :Options;

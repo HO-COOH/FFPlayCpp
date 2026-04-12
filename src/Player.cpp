@@ -14,7 +14,7 @@ extern "C" {
 #include <libavutil/mathematics.h>
 }
 module ffplay;
-import :VideoState;
+import :Player;
 import :Options;
 import utils.Clock;
 
@@ -180,12 +180,16 @@ namespace
 	}
 }
 
-void VideoState::Open()
+Player::Player(Options options) : m_options{std::move(options)}
 {
-	m_readThread.Run();
 }
 
-void VideoState::EventLoop(SDL_Window* window, SDL_Renderer* renderer)
+int Player::Open(char const* url)
+{
+	return m_readThread.Open(url, m_options);
+}
+
+void Player::EventLoop(SDL_Window* window, SDL_Renderer* renderer)
 {
 	m_window = window;
 	m_renderer = renderer;
@@ -209,16 +213,16 @@ void VideoState::EventLoop(SDL_Window* window, SDL_Renderer* renderer)
 	}
 }
 
-SyncType VideoState::getMasterSyncType() const
+SyncType Player::getMasterSyncType() const
 {
-	if (global_options.sync_type == SyncType::VideoMaster)
+	if (m_options.sync_type == SyncType::VideoMaster)
 	{
 		if (m_mediaState.video.index != -1)
 			return SyncType::VideoMaster;
 		else
 			return SyncType::AudioMaster;
 	}
-	else if (global_options.sync_type == SyncType::AudioMaster)
+	else if (m_options.sync_type == SyncType::AudioMaster)
 	{
 		if (m_mediaState.audio.index != -1)
 			return SyncType::AudioMaster;
@@ -229,7 +233,7 @@ SyncType VideoState::getMasterSyncType() const
 		return SyncType::External;
 }
 
-void VideoState::refresh_loop_wait_event(SDL_Event& event)
+void Player::refresh_loop_wait_event(SDL_Event& event)
 {
 	double remaining_time = 0.0;
 	SDL_PumpEvents();
@@ -248,7 +252,7 @@ void VideoState::refresh_loop_wait_event(SDL_Event& event)
 	}
 }
 
-double VideoState::getMasterClock() const
+double Player::getMasterClock() const
 {
 	switch (getMasterSyncType())
 	{
@@ -258,7 +262,7 @@ double VideoState::getMasterClock() const
 	}
 }
 
-void VideoState::onMouseMotion(SDL_Event const& event, bool isMouseButtonDown)
+void Player::onMouseMotion(SDL_Event const& event, bool isMouseButtonDown)
 {
 	if (cursor_hidden)
 	{
@@ -284,9 +288,9 @@ void VideoState::onMouseMotion(SDL_Event const& event, bool isMouseButtonDown)
 	seekToMousePosition(mouseX);
 }
 
-void VideoState::onMouseButtonDown(SDL_Event const& event)
+void Player::onMouseButtonDown(SDL_Event const& event)
 {
-	if (global_options.exit_on_mouse_down)
+	if (m_options.exit_on_mouse_down)
 	{
 		doExit();
 		return;
@@ -309,21 +313,21 @@ void VideoState::onMouseButtonDown(SDL_Event const& event)
 	onMouseMotion(event);
 }
 
-void VideoState::toggleFullScreen()
+void Player::toggleFullScreen()
 {
-	global_options.is_full_screen = !global_options.is_full_screen;
-	SDL_SetWindowFullscreen(m_window, global_options.is_full_screen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
+	m_options.is_full_screen = !m_options.is_full_screen;
+	SDL_SetWindowFullscreen(m_window, m_options.is_full_screen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
 }
 
-void VideoState::seekToMousePosition(double mouseX)
+void Player::seekToMousePosition(double mouseX)
 {
-	int windowWidth = global_options.screen_width;
+	int windowWidth = m_options.screen_width;
 	SDL_GetWindowSize(m_window, &windowWidth, nullptr);
 	double const percent = std::clamp(mouseX / std::max(windowWidth, 1), 0.0, 1.0);
-	m_readThread.SeekToPercent(percent);
+	m_readThread.SeekToPercent(percent, m_options.seek_by_bytes);
 }
 
-void VideoState::video_refresh(double& remaining_time)
+void Player::video_refresh(double& remaining_time)
 {
 	if (!m_mediaState.video.stream)
 		return;
@@ -376,13 +380,13 @@ void VideoState::video_refresh(double& remaining_time)
 		force_refresh = true;
 		break;
 	}
-	if (!global_options.display_disable && force_refresh && m_mediaState.pictq.has_shown_frame())
+	if (!m_options.display_disable && force_refresh && m_mediaState.pictq.has_shown_frame())
 		display();
 
 	force_refresh = false;
 }
 
-void VideoState::display()
+void Player::display()
 {
 	if (!m_renderer)
 		return;
@@ -420,18 +424,18 @@ void VideoState::display()
 	SDL_RenderPresent(m_renderer);
 }
 
-void VideoState::clampTimer(double now)
+void Player::clampTimer(double now)
 {
 	if (now - frame_timer > AV_SYNC_THRESHOLD_MAX)
 		frame_timer = now;
 }
 
-void VideoState::update_video_pts(double pts, int serial)
+void Player::update_video_pts(double pts, int serial)
 {
 	m_videoClock.Set(pts, serial);
 }
 
-double VideoState::calculateDuration(Frame const& vp, Frame const& nextvp) const
+double Player::calculateDuration(Frame const& vp, Frame const& nextvp) const
 {
 	if (vp.serial != nextvp.serial)
 		return 0;
@@ -443,7 +447,7 @@ double VideoState::calculateDuration(Frame const& vp, Frame const& nextvp) const
 	return duration;
 }
 
-double VideoState::calculateTargetDelay(double last_duration) const
+double Player::calculateTargetDelay(double last_duration) const
 {
 	if (getMasterSyncType() == SyncType::VideoMaster)
 		return last_duration;
@@ -466,9 +470,9 @@ double VideoState::calculateTargetDelay(double last_duration) const
 	return last_duration;
 }
 
-bool VideoState::shouldDropFrame(Frame const& vp, double now)
+bool Player::shouldDropFrame(Frame const& vp, double now)
 {
-	if (!global_options.framedrop || getMasterSyncType() == SyncType::VideoMaster)
+	if (!m_options.framedrop || getMasterSyncType() == SyncType::VideoMaster)
 		return false;
 
 	if (m_mediaState.pictq.available() <= 1)
@@ -479,7 +483,7 @@ bool VideoState::shouldDropFrame(Frame const& vp, double now)
 	return now > next_deadline;
 }
 
-void VideoState::doExit()
+void Player::doExit()
 {
 	m_mediaState.abort = true;
 	if (m_videoTexture)

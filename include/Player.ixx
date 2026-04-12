@@ -2,23 +2,26 @@ module;
 #include <SDL2/SDL_events.h>
 #include <SDL2/SDL_video.h>
 #include <SDL2/SDL_render.h>
-export module ffplay:VideoState;
+export module ffplay:Player;
 
 import :SyncType;
-import :ReadThread;
+import :Demuxer;
 import utils.Clock;
 import utils.PacketQueue;
 import utils.FrameQueue;
 import :MediaState;
 import utils.Frame;
+import :Options;
 
-export class VideoState
+export class Player
 {
 public:
-	void Open();
+	Player(Options options);
+	int Open(char const* url);
 
 	void EventLoop(SDL_Window* window, SDL_Renderer* renderer);
 private:
+	Options m_options;
 	SDL_Window* m_window{ nullptr };
 	SDL_Renderer* m_renderer{ nullptr };
 	SDL_Texture* m_videoTexture{ nullptr };
@@ -27,7 +30,7 @@ private:
 	Clock m_externalClock;
 
 	MediaState m_mediaState;
-	ReadThread m_readThread{ m_mediaState };
+	Demuxer m_readThread{ m_mediaState };
 	int64_t cursor_last_shown{};
 	double frame_timer{};
 	bool cursor_hidden{};
@@ -49,6 +52,7 @@ private:
 	[[nodiscard]] double calculateTargetDelay(double last_duration) const;
 	[[nodiscard]] bool shouldDropFrame(Frame const& vp, double now);
 	void doExit();
+
 	constexpr static auto CURSOR_HIDE_DELAY = 1000000;
 	constexpr static auto REFRESH_RATE = 0.01;
 	constexpr static int64_t DoubleClickIntervalThreshold = 500000;

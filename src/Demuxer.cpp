@@ -8,32 +8,33 @@ extern "C" {
 #include <libavcodec/avcodec.h>
 }
 module ffplay;
-import :ReadThread;
+import :Demuxer;
 import :Options;
 import AV.RAII;
 
-int ReadThread::open_input()
+int Demuxer::open_input(char const* url)
 {
-	auto inContextPtr = m_inContext.get();
-	int const ret = avformat_open_input(
+	auto inContextPtr = m_inContext.release();
+	int ret = avformat_open_input(
 		&inContextPtr,
-		"https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/1080/Big_Buck_Bunny_1080_10s_1MB.mp4",
+		url,
 		nullptr,
 		nullptr
 	);
+	m_inContext.reset(inContextPtr);
 	if (ret < 0)
 		return ret;
 
-	if (int const streamInfoRet = avformat_find_stream_info(m_inContext.get(), nullptr); streamInfoRet < 0)
-		return streamInfoRet;
+	if (ret = avformat_find_stream_info(m_inContext.get(), nullptr); ret < 0)
+		return ret;
 
 	max_frame_duration = (m_inContext->iformat->flags & AVFMT_TS_DISCONT) ? 10.0 : 3600.0;
 	return 0;
 }
 
-int ReadThread::set_streams()
+int Demuxer::set_streams(Options const& options)
 {
-	if (!global_options.disable_video)
+	if (!options.disable_video)
 	{
 		streamIndexMap[AVMediaType::AVMEDIA_TYPE_VIDEO] = av_find_best_stream(
 			m_inContext.get(),
@@ -45,7 +46,7 @@ int ReadThread::set_streams()
 		);
 	}
 
-	if (!global_options.disable_audio)
+	if (!options.disable_audio)
 	{
 		streamIndexMap[AVMediaType::AVMEDIA_TYPE_AUDIO] = av_find_best_stream(
 			m_inContext.get(),
@@ -57,7 +58,7 @@ int ReadThread::set_streams()
 		);
 	}
 
-	if (!global_options.disable_video && !global_options.disable_subtitle)
+	if (!options.disable_video && !options.disable_subtitle)
 	{
 		streamIndexMap[AVMediaType::AVMEDIA_TYPE_SUBTITLE] = av_find_best_stream(
 			m_inContext.get(),
@@ -72,42 +73,42 @@ int ReadThread::set_streams()
 	return 1;
 }
 
-int ReadThread::open_decoders()
+int Demuxer::open_decoders()
 {
-	if (auto const streamIndex = streamIndexMap[AVMediaType::AVMEDIA_TYPE_VIDEO]; streamIndex >= 0)
-	{
-		m_mediaState.video.index = streamIndex;
-		m_mediaState.video.stream = m_inContext->streams[streamIndex];
-		AV::CodecContext codecContext{ avcodec_alloc_context3(nullptr) };
-		if (!codecContext)
-			return AVERROR(ENOMEM);
+	auto const streamIndex = streamIndexMap[AVMediaType::AVMEDIA_TYPE_VIDEO];
+	if (streamIndex < 0)
+		return -1;
 
-		int const parametersToContextRet = avcodec_parameters_to_context(codecContext.get(), m_inContext->streams[streamIndex]->codecpar);
-		if (parametersToContextRet < 0)
-			return parametersToContextRet;
+	m_mediaState.video.index = streamIndex;
+	m_mediaState.video.stream = m_inContext->streams[streamIndex];
+	auto codecContext = AV::Codec::alloc_context3();
 
-		auto* codec = avcodec_find_decoder(codecContext->codec_id);
-		if (!codec)
-			return AVERROR_DECODER_NOT_FOUND;
+	int const parametersToContextRet = avcodec_parameters_to_context(codecContext.get(), m_inContext->streams[streamIndex]->codecpar);
+	if (parametersToContextRet < 0)
+		return parametersToContextRet;
 
-		codecContext->pkt_timebase = m_inContext->streams[streamIndex]->time_base;
-		int const openCodecRet = avcodec_open2(codecContext.get(), codec, nullptr);
-		if (openCodecRet < 0)
-			return openCodecRet;
+	auto* codec = avcodec_find_decoder(codecContext->codec_id);
+	if (!codec)
+		return AVERROR_DECODER_NOT_FOUND;
 
-		m_mediaState.video.queue.start();
-		m_mediaState.videoDecoder.emplace(
-			m_inContext.get(),
-			std::move(codecContext),
-			m_mediaState.video,
-			m_continue_read_thread
-		);
-		m_mediaState.videoDecoder->Start(m_mediaState.pictq);
-	}
-	return 1;
+	codecContext->pkt_timebase = m_inContext->streams[streamIndex]->time_base;
+	int const openCodecRet = avcodec_open2(codecContext.get(), codec, nullptr);
+	if (openCodecRet < 0)
+		return openCodecRet;
+
+	m_mediaState.video.queue.start();
+	m_mediaState.videoDecoder.emplace(
+		m_inContext.get(),
+		std::move(codecContext),
+		m_mediaState.video,
+		m_continue_read_thread
+	);
+	m_mediaState.videoDecoder->Start(m_mediaState.pictq);
+	return 0;
+
 }
 
-void ReadThread::read_loop()
+void Demuxer::read_loop()
 {
 	while (!m_mediaState.abort)
 	{
@@ -123,25 +124,34 @@ void ReadThread::read_loop()
 	}
 }
 
-ReadThread::ReadThread(MediaState& mediaState) : m_mediaState{mediaState}
+Demuxer::Demuxer(MediaState& mediaState) : m_mediaState{mediaState}
 {
 }
 
-void ReadThread::Run()
+int Demuxer::Open(char const* url, Options const& options)
 {
-	open_input();
-	set_streams();
-	open_decoders();
+	int ret = open_input(url);
+	if (ret < 0)
+		return ret;
 
-	m_thread = std::jthread{ &ReadThread::read_loop, this };
+	ret = set_streams(options);
+	if (ret < 0)
+		return ret;
+
+	ret = open_decoders();
+	if (ret < 0)
+		return ret;
+
+	m_thread = std::jthread{ &Demuxer::read_loop, this };
+	return 0;
 }
 
-void ReadThread::SeekToPercent(double percent)
+void Demuxer::SeekToPercent(double percent, bool seek_by_bytes)
 {
 	if (m_seekRequest.index() != 0)
 		return;
 
-	if (global_options.seek_by_bytes || m_inContext->duration <= 0)
+	if (seek_by_bytes || m_inContext->duration <= 0)
 	{
 		auto const totalBytes = avio_size(m_inContext->pb);
 		m_seekRequest = SeekByBytes{ static_cast<int64_t>(percent * totalBytes) };
